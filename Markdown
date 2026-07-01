@@ -1,0 +1,73 @@
+# Chronos-328: Standalone ATmega328P Embedded Countdown & Development Platform
+
+## Project Overview
+Chronos-328 is an open-source, standalone microcontroller evaluation board built around the **Microchip ATmega328P** 8-bit AVR architecture. This project details the transition from a verified Proteus simulation to a fully realized, routed PCB architecture featuring an integrated USB-to-UART serial interface, a robust regulated power supply stage, and multi-bus display hardware.
+
+The integrated firmware manages a synchronous countdown routine utilizing an I2C OLED display and a 74HC595 shift-register-driven Common Cathode 7-segment display alongside synchronized audio-visual feedback mechanisms.
+
+### Core System Features
+1. **Processor Core:** Standalone ATmega328P clocked by an external 16MHz crystal oscillator network.
+2. **On-Board Programmer:** Full FT232RL USB-to-UART circuit with data line conditioning and an automatic DTR bootloader reset circuit.
+3. **Power Subsystem:** 5V Linear regulation stage via an L7805 footprint, incorporating reverse-polarity protection and transient-filtering decoupling networks.
+4. **User Interface Module:** Simultaneous execution of high-speed I2C communication (128x64 OLED) and SPI-like bit-shifting (74HC595 Driving a 7-Segment Display).
+
+---
+
+## Hardware Architecture & Circuit Design
+
+### 1. USB-to-UART Transceiver (FT232RL)
+The communications module converts a physical USB interface down to TTL levels for programming the MCU. 
+* Cross-coupled hardware serial pins map `TXD` to the MCU `RXD` and `RXD` to the MCU `TXD`.
+* A `0.1µF` ceramic capacitor is placed inline with the `DTR` pin to generate the low-going pulse required to toggle the ATmega328P's hardware reset pin during bootloader initialization.
+
+### 2. Power Subsystem
+Designed to accept a wide input voltage (typically a 9V battery), the power rail drops down to a stable +5V DC bus.
+* **Bulk Decoupling:** Parallel configurations of high-value electrolytic capacitors ($10\mu\text{F}$) absorb massive transient current drops generated during concurrent buzzer and LED deployment. Low-value ceramic capacitors ($0.33\mu\text{F}$) filter high-frequency noise.
+
+### 3. I/O Pin Mapping Matrix
+
+| Component | Component Pin | ATmega328P Pin | Notes |
+| :--- | :--- | :--- | :--- |
+| **Crystal Oscillator (Y1)** | Pins 1 & 2 | PB6 / XTAL1 (Pin 7) & PB7 / XTAL2 (Pin 8) | Coupled with twin 22pF caps to GND |
+| **I2C OLED Display (U5)** | SCL <br> SDA | PC5 (Pin 28 / A5) <br> PC4 (Pin 27 / A4) | Hardware I2C Serial Bus |
+| **Shift Register (U3)** | SER (Data) <br> SRCLK (Clock) <br> RCLK (Latch) | PB3 (Pin 15 / MOSI) <br> PB5 (Pin 17 / SCK) <br> PB4 (Pin 16 / MISO) | Driven via software bit-shifting (`DS`, `SH`, `ST`) |
+| **Alarm Output (BZ1 / D7)** | Driver Net | PD5 (Pin 11) | Active-High synchronized output |
+| **Reset Interruption (SW1)** | Tactile Button | PC6 (Pin 1 / $\overline{\text{RESET}}$) | Hardware pull-up via $10\text{k}\Omega$ to +5V |
+
+---
+
+## Firmware Implementation
+
+The control logic checks the hardware status flags immediately upon boot to handle reset visual indicators, and transitions into non-blocking timing states for the countdown.
+
+### Logic Flow Diagram
+
+[Power On] ──> Read MCUSR Register ──> Flag EXTRF? ──> [YES] ──> Display "RESET"
+│
+[NO]
+▼
+Display "START"
+│
+▼
+Display "LOADING..."
+│
+▼
+9 to 0 Loop Intercept
+(Segment Countdown + Buzzer Pulse)
+│
+▼
+Display "END"
+(Continuous Alarm Trigger)
+
+### Main Sketch Execution
+```cpp
+// Isolated snippet showcasing bitwise reset checking in setup
+void setup() {
+  if (MCUSR & (1 << EXTRF)) {
+    wasHardwareReset = true;
+  }
+  MCUSR = 0; // Clear register flags for downstream execution
+  
+  // Peripherals initialization and sequence execution follow...
+  runSequence();
+}
